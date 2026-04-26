@@ -1,70 +1,96 @@
-"""
-Tests unitaires
-"""
-
-import pytest
-import sys
 from pathlib import Path
 
-# Ajouter le backend au chemin
-sys.path.insert(0, str(Path(__file__).parent.parent))
+import pandas as pd
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from backend.db.base import Base
+from backend.models import Article, Source
+from backend.repositories import ArticleRepository, SourceRepository
+from backend.services import ArticleService, CsvIngestionService
 
 
-class TestScraperService:
-    """Tests du service de scraping"""
-    
-    def test_clean_text(self):
-        from backend.services.nlp_service import NLPService
-        nlp = NLPService()
-        
-        text = "  Bonjour   monde  \n  test  "
-        cleaned = nlp.clean_text(text)
-        assert cleaned == "Bonjour monde test"
-    
-    def test_extract_keywords(self):
-        from backend.services.nlp_service import NLPService
-        nlp = NLPService()
-        
-        text = "le football est un sport populaire football football"
-        keywords = nlp.extract_keywords(text)
-        assert "football" in keywords
+def build_session():
+    engine = create_engine("sqlite:///:memory:", future=True, connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    return session_factory()
 
 
-class TestCredibilityService:
-    """Tests du service de crédibilité"""
-    
-    def test_get_source_credibility(self):
-        from backend.services.credibility_service import CredibilityService
-        credibility = CredibilityService()
-        
-        score = credibility.get_source_credibility("BBC Sport")
-        assert score == 5.0
-    
-    def test_unknown_source(self):
-        from backend.services.credibility_service import CredibilityService
-        credibility = CredibilityService()
-        
-        score = credibility.get_source_credibility("Unknown Source")
-        assert score == 2.0
-
-
-class TestRankingService:
-    """Tests du service de classement"""
-    
-    def test_rank_by_credibility(self):
-        from backend.services.ranking_service import RankingService
-        ranking = RankingService()
-        
-        articles = [
-            {"title": "A", "credibility_score": 5},
-            {"title": "B", "credibility_score": 3},
-            {"title": "C", "credibility_score": 1},
+def test_csv_ingestion_creates_articles_and_sources(tmp_path):
+    csv_path = tmp_path / "articles.csv"
+    pd.DataFrame(
+        [
+            {
+                "title": "Premier sujet football",
+                "source": "BBC Sport",
+                "lang": "fr",
+                "url": "https://example.com/1",
+                "date": "2026-04-26",
+                "summary": "Resume 1",
+                "category": "Football",
+                "credibility": 5,
+            },
+            {
+                "title": "Deuxieme sujet tennis",
+                "source": "Eurosport FR",
+                "lang": "fr",
+                "url": "https://example.com/2",
+                "date": "2026-04-25",
+                "summary": "Resume 2",
+                "category": "Tennis",
+                "credibility": 4,
+            },
         ]
-        
-        ranked = ranking.rank_articles(articles, "credibility", "desc")
-        assert ranked[0]["title"] == "A"
-        assert ranked[2]["title"] == "C"
+    ).to_csv(csv_path, index=False)
+
+    with build_session() as db:
+        result = CsvIngestionService(db).import_csv(csv_path)
+
+        assert result.inserted_articles == 2
+        assert result.updated_articles == 0
+        assert result.total_articles == 2
+        assert db.query(Source).count() == 2
+        assert db.query(Article).count() == 2
 
 
-if __name__ == "__main__":
-    pytest.main([__file__])
+def test_article_service_stats_are_consistent(tmp_path):
+    csv_path = tmp_path / "articles.csv"
+    pd.DataFrame(
+        [
+            {
+                "title": "Grand match",
+                "source": "BBC Sport",
+                "lang": "fr",
+                "url": "https://example.com/match",
+                "date": "2026-04-26",
+                "summary": "Un match important",
+                "category": "Football",
+                "credibility": 5,
+            },
+            {
+                "title": "Autre match",
+                "source": "BBC Sport",
+                "lang": "fr",
+                "url": "https://example.com/match-2",
+                "date": "2026-04-26",
+                "summary": "Encore un match",
+                "category": "Football",
+                "credibility": 5,
+            },
+        ]
+    ).to_csv(csv_path, index=False)
+
+    with build_session() as db:
+        CsvIngestionService(db).import_csv(csv_path)
+        service = ArticleService(ArticleRepository(db), SourceRepository(db))
+
+        response = service.list_articles(page=1, page_size=20)
+        stats = service.get_stats()
+
+        assert response.total == 2
+        assert len(response.items) == 2
+        assert stats.total_articles == 2
+        assert stats.total_categories == 1
+        assert stats.total_sources == 1
+        assert stats.categories["Football"] == 2

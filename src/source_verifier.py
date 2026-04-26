@@ -71,13 +71,15 @@ def verify_sources(input_path: str, output_path: str) -> pd.DataFrame:
         "source": "source",
         "categorie": "category", "category": "category",
         "date": "date",
-        "resume": "resume", "summary": "resume",
+        "resume": "summary", "summary": "summary",
         "url": "url", "lien": "url",
         "lang": "lang",
         "image_url": "image_url",
         "image_caption": "image_caption",
     }
     df = df.rename(columns={c: col_map.get(c, c) for c in df.columns})
+    if "summary" not in df.columns:
+        df["summary"] = ""
 
     # Ajouter crédibilité
     df["credibility"] = df["source"].apply(get_credibility)
@@ -99,6 +101,14 @@ def verify_sources(input_path: str, output_path: str) -> pd.DataFrame:
     print(f"   Articles ≥ 3★       : {(df['credibility'] >= 3).sum()}")
 
     # Sauvegarder
+    ordered_columns = [
+        column
+        for column in ["title", "source", "lang", "url", "date", "summary", "category", "credibility", "image_url", "image_caption"]
+        if column in df.columns
+    ]
+    remaining_columns = [column for column in df.columns if column not in ordered_columns]
+    df = df[ordered_columns + remaining_columns]
+
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     df.to_csv(output_path, index=False, encoding="utf-8-sig")
     print(f"\n✅ Sauvegardé : {output_path}")

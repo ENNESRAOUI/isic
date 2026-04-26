@@ -248,7 +248,7 @@ def scrape_source(source: dict) -> list[dict]:
                 "lang": source["lang"],
                 "url": url,
                 "date": date,
-                "resume": "",
+                "summary": "",
                 "category": "",
                 "credibility": 0,
             })
@@ -271,7 +271,7 @@ def scrape_source(source: dict) -> list[dict]:
                     "lang": source["lang"],
                     "url": url,
                     "date": today,
-                    "resume": "",
+                    "summary": "",
                     "category": "",
                     "credibility": 0,
                 })

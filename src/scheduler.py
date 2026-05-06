@@ -1,6 +1,7 @@
 import logging
 import json
 import asyncio
+import os
 from pathlib import Path
 from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -56,12 +57,18 @@ class ScraperScheduler:
         try:
             base_dir = Path(__file__).parent.parent
             script_path = base_dir / "src" / "run_pipeline.py"
+            process_env = {
+                **os.environ,
+                "PYTHONIOENCODING": "utf-8",
+                "PYTHONUTF8": "1",
+            }
             
             process = await asyncio.create_subprocess_exec(
                 sys.executable, str(script_path),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
-                cwd=base_dir
+                cwd=base_dir,
+                env=process_env,
             )
 
             while True:

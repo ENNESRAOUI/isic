@@ -1,271 +1,227 @@
 """
-ai_organizer.py — Classification multilingue des articles sportifs
-Supporte : Arabe (العربية) + Français + Anglais + Espagnol
+ai_organizer.py - Classification multilingue des articles sportifs.
+Supporte arabe, francais, anglais et espagnol.
 """
 
-import pandas as pd
-import re
+from __future__ import annotations
+
 import os
+import re
+import unicodedata
+from urllib.parse import unquote
 
-# ─────────────────────────────────────────────
-# DICTIONNAIRE DE MOTS-CLÉS MULTILINGUE
-# Chaque sport : [mots arabes, mots français, mots anglais, mots espagnols]
-# ─────────────────────────────────────────────
-KEYWORDS = {
+import pandas as pd
+
+CATEGORY_KEYWORDS: dict[str, list[str]] = {
     "Football": [
-        # Arabe
-        "كرة القدم", "كرة قدم", "الدوري", "فيفا", "يويفا", "المنتخب",
-        "الكرة", "مباراة", "هدف", "أهداف", "لاعب", "مدرب", "بطولة",
-        "الدوري الأبطال", "الريال مدريد", "برشلونة", "الأرسنال", "ليفربول",
-        "مانشستر", "بايرن", "باريس سان جيرمان", "يوفنتوس", "ميلان",
-        "الدوري الإسباني", "الدوري الإنجليزي", "الدوري الفرنسي",
-        "كأس العالم", "كأس أمم أفريقيا", "دوري أبطال أوروبا",
-        "المغرب", "مصر", "الجزائر", "تونس", "السنغال",
-        # Français
-        "football", "foot", "but", "buts", "ligue", "coupe du monde",
-        "ligue des champions", "ligue 1", "premier league", "la liga",
-        "bundesliga", "serie a", "transfert", "gardien", "attaquant",
-        # Anglais
-        "soccer", "goal", "goals", "fifa", "uefa", "premier league",
-        "champions league", "world cup", "penalty", "goalkeeper",
-        "striker", "midfielder", "defender",
-        # Espagnol
-        "fútbol", "gol", "liga", "copa",
+        "كرة القدم", "كرة قدم", "الكرة", "الدوري", "المنتخب", "مباراة", "هدف", "أهداف", "لاعب", "مدرب",
+        "دوري ابطال", "دوري أبطال", "كأس العالم", "كاس العالم", "فيفا", "يويفا",
+        "football", "foot", "soccer", "goal", "goals", "but", "buts", "penalty",
+        "goalkeeper", "striker", "midfielder", "defender", "transfer",
+        "coupe du monde", "world cup", "mondial", "ligue des champions", "champions league",
+        "premier league", "la liga", "liga", "bundesliga", "serie a", "botola",
+        "real madrid", "barcelona", "arsenal", "liverpool", "manchester", "psg",
+        "atletico", "raja", "wydad", "copa sudamericana",
+        "yallagoal", "يلاجول",
     ],
-
     "Tennis": [
-        # Arabe
-        "التنس", "رولان غاروس", "ويمبلدون", "بطولة أستراليا المفتوحة",
-        "يو إس أوبن", "غراند سلام", "مضرب", "الملعب", "أي تي بي", "دبليو تي إيه",
-        "فيدرر", "نادال", "ديوكوفيتش", "مدريد المفتوحة",
-        # Français
-        "tennis", "roland garros", "wimbledon", "grand slam", "atp", "wta",
-        "raquette", "set", "ace", "tie-break",
-        # Anglais
-        "tennis", "serve", "backhand", "forehand", "volley",
-        "open", "slam", "court", "racket",
+        "التنس", "رولان غاروس", "ويمبلدون", "غراند سلام", "atp", "wta",
+        "tennis", "roland garros", "wimbledon", "grand slam", "raquette",
+        "racket", "tie break", "tie-break", "backhand", "forehand", "novak djokovic",
+        "nadal", "federer",
     ],
-
     "Basketball": [
-        # Arabe
-        "كرة السلة", "الدوري الأمريكي للمحترفين", "أن بي إيه",
-        "سلة", "ملعب السلة", "نقاط", "دفاع", "هجوم",
-        "لوس أنجلوس ليكرز", "بوسطن سيلتيكس", "شيكاغو بولز",
-        # Français
-        "basketball", "basket", "nba", "panier", "dunk", "rebond",
-        "trois points", "playoff",
-        # Anglais
-        "basketball", "nba", "dunk", "rebound", "three-pointer",
-        "layup", "slam dunk", "playoffs",
+        "كرة السلة", "السلة", "ان بي ايه", "nba",
+        "basketball", "basket", "dunk", "rebound", "rebond", "three pointer",
+        "three-pointer", "playoff", "playoffs", "euroleague", "lakers", "celtics",
+        "thunder", "warriors", "knicks",
     ],
-
     "Rugby": [
-        # Arabe
-        "الرغبي", "كأس العالم للرغبي", "الستة الأمم",
-        # Français
-        "rugby", "essai", "mêlée", "plaquage", "six nations",
-        "top 14", "touche",
-        # Anglais
-        "rugby", "try", "scrum", "lineout", "tackle",
-        "six nations", "rugby union", "rugby league",
+        "الرغبي", "ستة امم", "كأس العالم للرغبي",
+        "rugby", "essai", "melee", "mêlée", "plaquage", "six nations",
+        "top 14", "scrum", "lineout", "tackle", "rugby world cup",
     ],
-
     "Cyclisme": [
-        # Arabe
         "الدراجات", "سباق الدراجات", "تور دو فرانس",
-        "جيرو د'إيطاليا", "فويلتا إسبانيا",
-        # Français
-        "cyclisme", "vélo", "tour de france", "étape", "peloton",
-        "contre-la-montre", "maillot jaune", "giro", "vuelta",
-        # Anglais
-        "cycling", "bicycle", "tour de france", "stage", "peloton",
-        "time trial", "yellow jersey",
+        "cyclisme", "cycling", "velo", "vélo", "tour de france", "giro", "vuelta",
+        "peloton", "maillot jaune", "yellow jersey", "contre la montre", "time trial",
     ],
-
     "Natation": [
-        # Arabe
-        "السباحة", "حمام السباحة", "أولمبياد السباحة",
-        "سباق السباحة", "محمد الشربيني",
-        # Français
-        "natation", "nage", "piscine", "crawl", "brasse",
-        "papillon", "dos", "longueur",
-        # Anglais
-        "swimming", "swimmer", "freestyle", "butterfly",
-        "breaststroke", "backstroke", "pool",
+        "السباحة", "سباق السباحة",
+        "natation", "swimming", "nage", "crawl", "brasse", "papillon", "dos",
+        "freestyle", "butterfly", "breaststroke", "backstroke",
     ],
-
-    "Athlétisme": [
-        # Arabe
-        "ألعاب القوى", "العدو", "القفز", "رمي", "سباق",
-        "ماراثون", "الأولمبياد",
-        # Français
-        "athlétisme", "sprint", "marathon", "saut", "lancer",
-        "haies", "relais", "décathlon",
-        # Anglais
-        "athletics", "sprint", "marathon", "hurdles", "relay",
-        "decathlon", "javelin", "discus", "shot put",
+    "Athletisme": [
+        "العاب القوى", "ألعاب القوى", "ماراثون", "سباق",
+        "athletisme", "athlétisme", "athletics", "sprint", "marathon", "hurdles",
+        "relay", "relais", "decathlon", "decathlon", "javelin", "discus", "shot put",
     ],
-
     "Boxe": [
-        # Arabe
-        "الملاكمة", "بطل العالم", "حزام بطولة", "جولة",
-        "ضربة قاضية",
-        # Français
-        "boxe", "boxeur", "ring", "knockout", "k.o.",
-        "champion du monde", "round",
-        # Anglais
-        "boxing", "boxer", "knockout", "k.o.", "heavyweight",
-        "welterweight", "champion",
+        "الملاكمة", "ضربة قاضية", "بطل العالم",
+        "boxe", "boxing", "boxer", "knockout", "k o", "ko", "ring",
+        "heavyweight", "welterweight", "round",
     ],
-
     "Formule 1": [
-        # Arabe
-        "الفورمولا 1", "فورمولا 1", "سباق السيارات", "فيراري",
-        "مرسيدس", "ريد بول", "لويس هاميلتون", "فيرستابين",
-        "سباق جائزة كبرى",
-        # Français
-        "formule 1", "f1", "grand prix", "ferrari", "mercedes",
-        "red bull", "mclaren", "pole position",
-        # Anglais
-        "formula 1", "f1", "grand prix", "ferrari", "mercedes",
-        "red bull", "pole position", "pit stop",
+        "الفورمولا 1", "فورمولا 1", "سباق السيارات", "سباق جائزة كبرى",
+        "formule 1", "formula 1", "f1", "grand prix", "pit stop", "pole position",
+        "ferrari", "mercedes", "red bull", "mclaren", "verstappen", "hamilton",
     ],
-
     "Golf": [
-        # Arabe
-        "الغولف", "بطولة ماسترز", "بطولة بريطانيا المفتوحة",
-        # Français
-        "golf", "green", "eagle", "birdie", "par", "bogey",
-        "masters", "open", "club",
-        # Anglais
-        "golf", "birdie", "eagle", "par", "bogey", "masters",
-        "pga", "open championship",
+        "الغولف",
+        "golf", "pga", "birdie", "bogey", "fairway", "tee", "ryder cup",
     ],
-
     "Handball": [
-        # Arabe
-        "كرة اليد", "دوري كرة اليد", "بطولة كرة اليد",
-        # Français
-        "handball", "hand", "gardien de but", "ailier",
-        "pivot", "jet de 7 mètres",
-        # Anglais
-        "handball", "goalkeeper",
+        "كرة اليد",
+        "handball", "pivot", "ailier", "sept metres", "7 metres", "7 meter",
     ],
-
     "Volleyball": [
-        # Arabe
         "الكرة الطائرة", "طائرة",
-        # Français
-        "volleyball", "volley", "filet", "service", "smash",
-        # Anglais
-        "volleyball", "spike", "set", "libero",
+        "volleyball", "volley", "libero", "spike", "smash", "filet",
+    ],
+    "Auto/Moto": [
+        "رالي", "سيارات", "دراجات نارية",
+        "auto moto", "auto-moto", "automobile", "rally", "rallye", "historic rally",
+        "motogp", "moto gp", "superbike", "wrc", "karting",
+    ],
+    "Combat": [
+        "كيندو", "جودو", "كاراتيه", "تايكوندو",
+        "combat", "arts martiaux", "mma", "ufc", "kendo", "judo", "karate",
+        "taekwondo", "kickboxing",
     ],
 }
 
-# Catégories en arabe → nom normalisé
-ARABIC_CAT_MAP = {
-    "كرة القدم":    "Football",
-    "التنس":        "Tennis",
-    "كرة السلة":   "Basketball",
-    "الرغبي":       "Rugby",
-    "الدراجات":    "Cyclisme",
-    "السباحة":     "Natation",
-    "ألعاب القوى": "Athlétisme",
-    "الملاكمة":    "Boxe",
-    "الفورمولا 1": "Formule 1",
-    "الغولف":      "Golf",
+SOURCE_HINTS = {
+    "tennis explorer": "Tennis",
+    "onefootball": "Football",
+    "90min": "Football",
+}
+
+MIN_CATEGORY_SCORE = 2
+FIELD_WEIGHTS = {
+    "title": 6,
+    "url": 5,
+    "summary": 4,
+    "source": 2,
 }
 
 
-def detect_language(text: str) -> str:
-    """Détecte si le texte est majoritairement arabe."""
-    if not text:
-        return "other"
-    arabic_chars = len(re.findall(r'[\u0600-\u06FF]', text))
-    total_chars = len(text.replace(" ", ""))
-    if total_chars == 0:
-        return "other"
-    ratio = arabic_chars / total_chars
-    return "arabic" if ratio > 0.25 else "latin"
+def normalize_text(text: str) -> str:
+    value = unquote(str(text or "")).lower()
+    value = unicodedata.normalize("NFKD", value)
+    value = "".join(char for char in value if not unicodedata.combining(char))
+    value = value.replace("’", "'").replace("`", "'")
+    value = re.sub(r"[^a-z0-9\u0600-\u06FF]+", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
 
 
-def classify_article(title: str, source: str = "") -> str:
-    """
-    Classifie un article dans une catégorie sportive.
-    Supporte arabe, français, anglais, espagnol.
-    """
-    text = (title + " " + source).lower()
+def contains_keyword(haystack: str, keyword: str) -> bool:
+    normalized_keyword = normalize_text(keyword)
+    if not normalized_keyword:
+        return False
+    wrapped_haystack = f" {haystack} "
+    wrapped_keyword = f" {normalized_keyword} "
+    return wrapped_keyword in wrapped_haystack
 
-    best_cat = "Autre"
+
+def keyword_weight(keyword: str) -> int:
+    token_count = len(normalize_text(keyword).split())
+    return max(1, token_count)
+
+
+def category_score(category: str, fields: dict[str, str]) -> int:
+    score = 0
+    for field_name, field_weight in FIELD_WEIGHTS.items():
+        text = fields[field_name]
+        if not text:
+            continue
+        for keyword in CATEGORY_KEYWORDS[category]:
+            if contains_keyword(text, keyword):
+                score += field_weight * keyword_weight(keyword)
+    return score
+
+
+def classify_article(title: str, source: str = "", url: str = "", summary: str = "") -> str:
+    fields = {
+        "title": normalize_text(title),
+        "source": normalize_text(source),
+        "url": normalize_text(url),
+        "summary": normalize_text(summary),
+    }
+
+    best_category = "Autre"
     best_score = 0
 
-    for category, keywords in KEYWORDS.items():
-        score = 0
-        for kw in keywords:
-            kw_lower = kw.lower()
-            if kw_lower in text:
-                # Bonus si mot-clé long (plus spécifique)
-                score += len(kw_lower.split())
+    for category in CATEGORY_KEYWORDS:
+        score = category_score(category, fields)
         if score > best_score:
             best_score = score
-            best_cat = category
+            best_category = category
 
-    return best_cat
+    if best_score >= MIN_CATEGORY_SCORE:
+        return best_category
+
+    source_key = fields["source"]
+    for source_hint, category in SOURCE_HINTS.items():
+        if contains_keyword(source_key, source_hint):
+            return category
+    return "Autre"
 
 
 def organize_articles(input_path: str, output_path: str) -> pd.DataFrame:
-    """Charge le CSV et classifie chaque article."""
-    print(f"📂 Lecture : {input_path}")
+    print(f"Lecture : {input_path}")
     df = pd.read_csv(input_path, encoding="utf-8-sig")
 
-    # Normaliser les noms de colonnes
-    df.columns = [c.strip().lower() for c in df.columns]
+    df.columns = [str(column).strip().lower() for column in df.columns]
     col_map = {
-        "titre": "title", "title": "title",
+        "titre": "title",
+        "title": "title",
         "source": "source",
-        "categorie": "category", "category": "category", "discipline": "category",
+        "categorie": "category",
+        "category": "category",
+        "discipline": "category",
         "date": "date",
-        "resume": "summary", "summary": "summary",
-        "url": "url", "lien": "url",
-        "credibility": "credibility", "credibilite": "credibility",
+        "resume": "summary",
+        "summary": "summary",
+        "url": "url",
+        "lien": "url",
+        "credibility": "credibility",
+        "credibilite": "credibility",
     }
-    df = df.rename(columns={c: col_map.get(c, c) for c in df.columns})
+    df = df.rename(columns={column: col_map.get(column, column) for column in df.columns})
 
     if "title" not in df.columns:
         raise ValueError("Colonne 'titre' ou 'title' introuvable dans le CSV")
 
-    print(f"📊 {len(df)} articles à classifier…")
-
-    # Classifier
+    print(f"{len(df)} articles a classifier...")
     df["category"] = df.apply(
         lambda row: classify_article(
             str(row.get("title", "")),
-            str(row.get("source", ""))
+            str(row.get("source", "")),
+            str(row.get("url", "")),
+            str(row.get("summary", "")),
         ),
-        axis=1
+        axis=1,
     )
 
-    # Stats
     counts = df["category"].value_counts()
-    print("\n📈 Résultats de classification :")
-    for cat, n in counts.items():
-        pct = n / len(df) * 100
-        print(f"   {cat:20s} → {n:4d} articles ({pct:.1f}%)")
+    print("\nResultats de classification :")
+    for category, count in counts.items():
+        pct = count / len(df) * 100
+        print(f"   {category:20s} -> {count:4d} articles ({pct:.1f}%)")
 
-    # Sauvegarder
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     df.to_csv(output_path, index=False, encoding="utf-8-sig")
-    print(f"\n✅ Sauvegardé : {output_path}")
+    print(f"\nSauvegarde : {output_path}")
     return df
 
 
 if __name__ == "__main__":
-    BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    inp = os.path.join(BASE, "data", "output", "articles.csv")
-    out = os.path.join(BASE, "data", "output", "organized_articles.csv")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    input_file = os.path.join(base_dir, "data", "output", "articles.csv")
+    output_file = os.path.join(base_dir, "data", "output", "organized_articles.csv")
 
-    if not os.path.exists(inp):
-        print(f"❌ Fichier introuvable : {inp}")
-        print("   → Exécutez d'abord scraper.py")
+    if not os.path.exists(input_file):
+        print(f"Fichier introuvable : {input_file}")
+        print("Executez d'abord scraper.py")
     else:
-        organize_articles(inp, out)
+        organize_articles(input_file, output_file)
